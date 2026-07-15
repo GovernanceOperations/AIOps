@@ -1,0 +1,232 @@
+name: AO4 — Epistemic Field Maintenance
+
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        required: true
+        type: string
+
+jobs:
+  epistemic-field:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load current Epistemic Field state
+        id: ef-state
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Retrieve the current Epistemic Field state from the Memory Layer.
+          # The EF is maintained as a structured document in the Observability Store,
+          # keyed by governance domain and item identifier.
+          #
+          # EF state structure:
+          #   confirmed: { domain: { item_id: { value, certified_at, expires_at, source } } }
+          #   disputed:  { domain: { item_id: { value, disputed_since, observer_positions } } }
+          #   unknown:   { domain: [ item_id ] }
+          #
+          # In production: retrieve from Observability Store API.
+          # For initial deployment: bootstrap from source-registry.json.
+
+          echo "Loading Epistemic Field state from Observability Store..."
+          CONFIRMED_COUNT=0
+          DISPUTED_COUNT=0
+          UNKNOWN_COUNT=0
+
+          echo "confirmed_count=$CONFIRMED_COUNT" >> $GITHUB_OUTPUT
+          echo "disputed_count=$DISPUTED_COUNT" >> $GITHUB_OUTPUT
+          echo "unknown_count=$UNKNOWN_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Process new Confirmed region extensions
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Every GPS record operation that passed Multi-Observer Verification
+          # and carries no Disagreement Condition flag extends the Confirmed region.
+          #
+          # Per GADS §5.2:
+          # - Retrieve all GPS record operations from the current ingestion cycle
+          #   where input_verification_status: multi_observer_verified
+          #   and agreement_assessment.disagreement_condition_active: false
+          # - For each: add or update the Confirmed region entry
+          #   with certified_at = record timestamp
+          #   and expires_at = certified_at + staleness_window
+          #   (365 days for Class 1 instrument data; 180 days for Class 2/3)
+
+          echo "Processing new Confirmed region extensions..."
+          # In production: parse GPS record messages from AO2 routing output,
+          # filter by verification status, update EF Confirmed region.
+
+      - name: Check Confirmed region staleness
+        id: staleness
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Per GADS §5.2: items in Confirmed region that have not been
+          # re-verified within their staleness window are reclassified to Disputed.
+          #
+          # Staleness limits from aiops.yml:
+          #   confirmed_staleness_class1_days: 365
+          #   confirmed_staleness_class23_days: 180
+          #
+          # For each Confirmed item:
+          #   if now() > expires_at: move to Disputed; produce GPS adapt operation
+
+          STALE_COUNT=0
+          echo "Checking Confirmed region staleness..."
+          echo "stale_count=$STALE_COUNT" >> $GITHUB_OUTPUT
+
+          if [ "$STALE_COUNT" -gt 0 ]; then
+            echo "::warning::$STALE_COUNT Confirmed region items past staleness window — reclassifying to Disputed"
+          fi
+
+      - name: Process Disagreement Condition triggers
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # GPS verify operations with disagreement_condition_active: true
+          # trigger reclassification of the affected items from Confirmed to Disputed.
+          #
+          # Per GADS §5.3:
+          # - Track specific observer positions causing the dispute
+          # - Compute OAS per GMF §4.1 to quantify disagreement severity
+          # - Disputes persisting beyond 14 days without resolution:
+          #   GPS escalation to Oversight Body
+
+          echo "Processing Disagreement Condition triggers..."
+          # In production: scan GPS verify messages from AO2 routing output
+          # for disagreement_condition_active: true.
+          # For each: move affected items to Disputed region,
+          # record observer positions, start 14-day resolution timer.
+
+      - name: Apply Adapt step reclassifications
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # GPS adapt operations carry adapt_payload.epistemic_field_updates
+          # which explicitly reclassify EF items.
+          # Per GADS §5, AO4 is the authoritative processor of these updates.
+          #
+          # Update types:
+          #   region_reclassification  → move item between regions
+          #   coverage_extension       → add new item to Confirmed
+          #   disputed_resolution      → move from Disputed to Confirmed
+          #   unknown_mapped           → move from Unknown to Confirmed or Disputed
+
+          echo "Applying adapt step reclassifications from GPS adapt messages..."
+          # In production: retrieve GPS adapt messages from AO2 routing output,
+          # parse adapt_payload.epistemic_field_updates,
+          # apply each reclassification to the EF state.
+
+      - name: Identify Unknown region items
+        id: unknown
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Per GADS §5.4: identify governance domains where AIOps has
+          # insufficient or no observations.
+          #
+          # Unknown region check: for each governance domain in each discipline,
+          # if no observations received within the domain's collection_lag_alert_seconds,
+          # the domain enters the Unknown region.
+          #
+          # Critical domain Unknown region max: 7 days (from aiops.yml)
+          # After 7 days without approved observation gap DC: GPS escalation to OB.
+
+          UNKNOWN_CRITICAL_COUNT=0
+          UNKNOWN_NONCRITICAL_COUNT=0
+
+          REGISTRY=".github/govops/source-registry.json"
+
+          # Check governance-critical sources
+          CRITICAL_SOURCES=$(jq -r '.sources[] | select(.governance_critical == true and .status == "active") | .domain' "$REGISTRY" | sort -u)
+
+          for domain in $CRITICAL_SOURCES; do
+            # In production: check last-seen timestamp for this domain
+            # against collection_lag_critical_seconds
+            echo "  Checking critical domain: $domain"
+          done
+
+          echo "unknown_critical_count=$UNKNOWN_CRITICAL_COUNT" >> $GITHUB_OUTPUT
+          echo "unknown_noncritical_count=$UNKNOWN_NONCRITICAL_COUNT" >> $GITHUB_OUTPUT
+
+          if [ "$UNKNOWN_CRITICAL_COUNT" -gt 0 ]; then
+            echo "::error::$UNKNOWN_CRITICAL_COUNT governance-critical domains in Unknown EF region"
+          fi
+
+      - name: Compute EFCS
+        id: efcs
+        run: |
+          # EFCS = Confirmed_inputs / (Confirmed + Disputed + Unknown)
+          # per GMF §4.3.1 and GADS §5.5
+          CONFIRMED=${{ steps.ef-state.outputs.confirmed_count }}
+          DISPUTED=${{ steps.ef-state.outputs.disputed_count }}
+          UNKNOWN=${{ steps.ef-state.outputs.unknown_count }}
+          STALE=${{ steps.staleness.outputs.stale_count }}
+
+          # Adjust for newly stale items
+          EFFECTIVE_CONFIRMED=$(( ${CONFIRMED:-0} - ${STALE:-0} ))
+          TOTAL=$(( ${EFFECTIVE_CONFIRMED:-0} + ${DISPUTED:-0} + ${STALE:-0} + ${UNKNOWN:-0} ))
+
+          if [ "$TOTAL" -gt 0 ]; then
+            EFCS=$(echo "scale=3; $EFFECTIVE_CONFIRMED / $TOTAL" | bc)
+          else
+            EFCS="0.000"
+            echo "::warning::No EF items found — EFCS defaulting to 0.000 (bootstrap state)"
+          fi
+
+          echo "EFCS: $EFCS"
+          echo "efcs=$EFCS" >> $GITHUB_OUTPUT
+
+          # Alert thresholds from aiops.yml epistemic_field section
+          ALERT_THRESHOLD="0.700"
+          CRITICAL_THRESHOLD="0.500"
+
+          if (( $(echo "$EFCS < $CRITICAL_THRESHOLD" | bc -l) )); then
+            echo "::error::EFCS $EFCS is below critical threshold $CRITICAL_THRESHOLD"
+            # In production: GPS alert severity critical to RiskOps
+          elif (( $(echo "$EFCS < $ALERT_THRESHOLD" | bc -l) )); then
+            echo "::warning::EFCS $EFCS is below alert threshold $ALERT_THRESHOLD"
+            # In production: GPS alert severity high to RiskOps
+          fi
+
+      - name: Produce GPS adapt operations for EF updates
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Write GPS adapt operations to the Immutable Ledger for all EF
+          # reclassifications performed in this cycle.
+          # Per AMD-001 §C.2.6: adapt_payload.epistemic_field_updates
+          # carries the reclassification records.
+
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%6NZ")
+          EFCS=${{ steps.efcs.outputs.efcs }}
+
+          echo "EF maintenance cycle complete at $TIMESTAMP"
+          echo "  EFCS: $EFCS"
+          echo "  Confirmed: ${{ steps.ef-state.outputs.confirmed_count }}"
+          echo "  Disputed: ${{ steps.ef-state.outputs.disputed_count }}"
+          echo "  Stale reclassified: ${{ steps.staleness.outputs.stale_count }}"
+          echo "  Unknown critical: ${{ steps.unknown.outputs.unknown_critical_count }}"
+
+          # In production: write GPS adapt message to Immutable Ledger
+          # with adapt_payload.epistemic_field_updates listing all changes,
+          # adapt_payload.adaptation_confidence = EFCS,
+          # and governance_record_reference to this EF cycle.
+
+      - name: Escalate persistent disputes
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Per GADS §5.3: disputes persisting beyond 14 days without
+          # resolution trigger GPS escalation to Oversight Body.
+          # Decision-class restriction applies until resolved.
+
+          echo "Checking for disputes older than 14 days..."
+          # In production: query Disputed region for items with
+          # disputed_since more than 14 days ago.
+          # For each: GPS escalation, escalation_path: oversight_body,
+          # escalation_urgency: within_72hrs (not immediate for EF disputes)

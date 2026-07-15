@@ -1,0 +1,109 @@
+name: AO2 — Classification and Routing
+
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        required: true
+        type: string
+
+jobs:
+  classify-and-route:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Schema validation
+        run: |
+          # Validate each queued record against its domain schema.
+          # Records failing schema validation are classified as epistemic_region: disputed
+          # and logged — they are not discarded.
+          SCHEMAS_DIR="schemas"
+          echo "Validating ingested records against domain schemas..."
+          for schema in "$SCHEMAS_DIR"/*.json; do
+            echo "  Schema available: $(basename $schema)"
+          done
+          # In production: for each record in the ingestion queue,
+          # validate against observability-record.json schema.
+          # Log validation failures as GPS alert informational.
+
+      - name: Epistemic Field region assignment
+        run: |
+          # Assign each validated record to confirmed / disputed / unknown.
+          #
+          # CONFIRMED: record carries valid provenance signature from a
+          #   registered source, is internally consistent, and has not
+          #   triggered any synthetic observation detection flag.
+          #
+          # DISPUTED: provenance verification failed, or cross-source
+          #   inconsistency detected, or synthetic observation indicator
+          #   triggered. Record is logged and flagged — not used in
+          #   GC computation until Verify Layer resolves classification.
+          #
+          # UNKNOWN: no records received for this governance domain
+          #   within the expected collection interval.
+
+          echo "Classifying records by Epistemic Field region..."
+          # In production: implement classification logic against
+          # the Epistemic Field state maintained in the Observability Store.
+          # Output: count of confirmed / disputed / unknown per domain.
+
+      - name: Anomaly pre-scoring
+        run: |
+          # Compute initial deviation score for each classified record
+          # against the 90-day rolling baseline for its domain.
+          # Pre-scoring here enables AO3 to focus on records already
+          # flagged above the informational threshold.
+          #
+          # Deviation tiers from GADS §4.2 and aiops.yml analysis.anomaly_detection.tiers:
+          #   < 1σ  → pass through, no pre-flag
+          #   1-2σ  → pre-flag informational
+          #   2-3σ  → pre-flag notable
+          #   3-5σ  → pre-flag significant
+          #   > 5σ  → pre-flag critical
+
+          echo "Pre-scoring records against anomaly baselines..."
+          # In production: load baseline statistics from Observability Store,
+          # compute Z-scores for numeric metrics, flag deviations above 1σ.
+
+      - name: Cross-domain correlation matching
+        run: |
+          # Check incoming records against the six mandatory correlation
+          # pattern windows from GADS §4.3 and configs/correlation-rules.yml.
+          # Pattern windows slide over the last correlation_window_minutes.
+
+          if [ -f "configs/correlation-rules.yml" ]; then
+            echo "Loading correlation rules..."
+            # In production: for each enabled mandatory pattern,
+            # check whether current record + recent history matches.
+            # Pattern match → pre-flag for AO3 escalation path.
+          fi
+
+      - name: Route to consumers
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Route classified and pre-scored records to their consumers:
+          #
+          # GOVERNANCE EVENTS → Immutable Ledger via GPS record operation
+          # ANOMALY PRE-FLAGS → AO3 anomaly detection queue
+          # GC COMPONENT DATA → AO5 measurement input buffer
+          # THREAT INTELLIGENCE → SecOps adversarial feed endpoint
+          # STAKEHOLDER SIGNALS → SocietalOps input queue
+
+          echo "Routing records to consumers..."
+          echo "  Governance Events → Immutable Ledger"
+          echo "  Anomaly pre-flags → AO3 queue"
+          echo "  GC component data → AO5 buffer"
+          echo "  Threat intelligence → SecOps endpoint"
+          echo "  Stakeholder signals → SocietalOps queue"
+
+      - name: Write classification record to ledger
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%6NZ")
+          echo "Classification cycle complete at $TIMESTAMP"
+          # In production: write GPS record operation to Immutable Ledger
+          # with counts: confirmed / disputed / unknown / routed per domain.
