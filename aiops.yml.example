@@ -1,0 +1,269 @@
+# aiops.yml — GovOps AIOps Layer configuration
+#
+# Copy this file to the AIOps repository root as aiops.yml
+# and fill in the values. Fields marked REQUIRED must be completed
+# before AIOps can receive data from any source.
+#
+# Full configuration reference: docs/configuration-reference.md
+# Plain-language guide: docs/vocabulary.md
+
+govops_version: "0.9"
+
+# --- AIOps identity ---
+aiops:
+  # Identifier for this AIOps deployment. Used in Governance Event payloads
+  # and as the prefix for the Immutable Ledger chain IDs.
+  # REQUIRED. Format: <org>-aiops or similar stable identifier.
+  deployment_id: "your-org-aiops"
+
+  # Operating tier for this AIOps deployment.
+  # REQUIRED. 1 = organisation-wide. 2 = division. 3 = programme. 4 = project.
+  # AIOps is typically tier 1 since it observes all other disciplines.
+  tier: 1
+
+# --- Immutable Ledger ---
+ledger:
+  # REQUIRED. The endpoint URL of the Immutable Ledger receiving Governance Events.
+  # Must satisfy GPS §4.5 append-only requirements.
+  endpoint: "https://your-ledger.example/govops/v1/audit/events"
+
+  # REQUIRED. GitHub secret name containing the Ledger API key.
+  auth_secret: "AIOPS_LEDGER_API_KEY"
+
+  # REQUIRED. Chain identifier for the AIOps governance chain.
+  # Format: <org>-aiops-<environment>
+  chain_id: "your-org-aiops-production"
+
+  # Cryptographic algorithm for Governance Event signing.
+  # Must be from GOS §11.2 approved list. Default: dilithium3.
+  signature_algorithm: "dilithium3"
+
+  # Optional webhook for alert notifications.
+  alert_channel: ""
+
+# --- GPS Protocol endpoint (optional) ---
+# If set, AIOps wraps Governance Events in full GPS §1.2 protocol messages
+# and transmits to the Centre. If not set, AIOps operates as a standalone
+# observability layer writing directly to the Immutable Ledger.
+gps_endpoint:
+  enabled: false
+  url: ""
+  auth_secret: "AIOPS_GPS_API_KEY"
+  session_negotiation: true
+
+# --- Observability domains ---
+# Configure each domain's data sources and collection settings.
+# Each domain can have multiple sources. At least one source must be
+# configured per domain for that domain to contribute to EF coverage.
+
+domains:
+
+  technical:
+    enabled: true
+    # Sources: any system producing metrics, logs, or traces
+    sources:
+      - id: "itsm-availability"
+        type: "prometheus"           # prometheus | datadog | cloudwatch | custom
+        endpoint: "https://your-prometheus.example"
+        auth_secret: "PROMETHEUS_API_KEY"
+        scrape_interval_seconds: 30
+        governance_critical: true
+      - id: "infra-reconciliation"
+        type: "webhook"              # receives InfraConfig reconciliation events
+        auth_secret: "INFRA_WEBHOOK_SECRET"
+        governance_critical: true
+    collection_lag_alert_seconds: 60
+    collection_lag_critical_seconds: 300
+
+  governance:
+    enabled: true
+    # Sources: GPS Audit Interface from all discipline implementations
+    sources:
+      - id: "projops-ledger"
+        type: "gps_audit"            # polls GPS §4.5 Audit Interface
+        endpoint: "https://your-projops-ledger.example/govops/v1/audit/events"
+        auth_secret: "PROJOPS_AUDIT_KEY"
+        poll_interval_seconds: 60
+        governance_critical: true
+      - id: "policy-engine"
+        type: "webhook"
+        auth_secret: "POLICY_WEBHOOK_SECRET"
+        governance_critical: false
+    collection_lag_alert_seconds: 60
+    collection_lag_critical_seconds: 300
+
+  financial:
+    enabled: true
+    sources:
+      - id: "fingov-telemetry"
+        type: "webhook"              # receives FinGov GPS sense messages
+        auth_secret: "FINGOV_WEBHOOK_SECRET"
+        governance_critical: false
+    collection_lag_alert_seconds: 300
+    collection_lag_critical_seconds: 900
+
+  security:
+    enabled: true
+    sources:
+      - id: "secops-sfr"
+        type: "webhook"              # receives SecOps SFR GPS record messages
+        auth_secret: "SECOPS_WEBHOOK_SECRET"
+        governance_critical: true
+      - id: "isd-gates"
+        type: "webhook"
+        auth_secret: "ISD_WEBHOOK_SECRET"
+        governance_critical: false
+      - id: "network-anomaly"
+        type: "webhook"
+        auth_secret: "NETWORK_WEBHOOK_SECRET"
+        governance_critical: true
+    collection_lag_alert_seconds: 30
+    collection_lag_critical_seconds: 120
+
+  identity:
+    enabled: true
+    sources:
+      - id: "gps-message-stream"
+        type: "gps_audit"            # extracts actor_identity from all GPS messages
+        endpoint: "https://your-ledger.example/govops/v1/audit/events"
+        auth_secret: "AIOPS_LEDGER_API_KEY"
+        poll_interval_seconds: 60
+        governance_critical: false
+    collection_lag_alert_seconds: 300
+    collection_lag_critical_seconds: 900
+
+  stakeholder:
+    enabled: true
+    sources:
+      - id: "societal-ops-feedback"
+        type: "webhook"              # receives SocietalOps GPS sense messages
+        auth_secret: "SOCIETAL_WEBHOOK_SECRET"
+        governance_critical: false
+    collection_lag_alert_seconds: 3600    # 1 hour — stakeholder signals are less frequent
+    collection_lag_critical_seconds: 86400 # 24 hours
+
+  adversarial:
+    enabled: true
+    sources:
+      - id: "secops-threat-intel"
+        type: "webhook"              # receives SecOps adversarial intelligence GPS alerts
+        auth_secret: "SECOPS_WEBHOOK_SECRET"
+        governance_critical: false
+    # Note: automated adversarial simulation tooling is connected here when available.
+    # See docs/adopting-aiops.md for adversarial domain setup.
+    collection_lag_alert_seconds: 3600
+    collection_lag_critical_seconds: 86400
+
+# --- Analysis Engine ---
+analysis:
+  # Anomaly detection settings
+  anomaly_detection:
+    # Baseline window for computing expected behaviour.
+    baseline_window_days: 90
+
+    # Baseline recomputation frequency (rolling).
+    baseline_recompute_hours: 24
+
+    # Deviation thresholds for alert tiers (standard deviations from baseline mean).
+    tiers:
+      informational: 1.0   # 1-2σ: log only
+      notable: 2.0         # 2-3σ: alert informational
+      significant: 3.0     # 3-5σ: alert medium/high + RiskOps signal
+      critical: 5.0        # >5σ: alert critical + escalation
+
+    # Alert on baseline poisoning: if baseline shifts by more than this proportion
+    # in 30 days, it is itself an anomaly.
+    baseline_shift_alert_threshold: 0.20
+
+  # Cross-domain correlation settings
+  correlation:
+    # How often to run cross-domain correlation checks (sliding window).
+    check_interval_minutes: 5
+
+    # Time window for correlation pattern matching.
+    correlation_window_minutes: 60
+
+    # Enable mandatory correlation patterns from GADS §4.3.
+    # Each can be individually disabled if not applicable to this deployment.
+    mandatory_patterns:
+      security_plus_financial: true
+      identity_plus_governance_bypass: true
+      stakeholder_decline_plus_disclosure_delay: true
+      multi_discipline_alert_spike: true
+      ai_drift_plus_data_quality: true
+      pipeline_bypass_plus_security_decline: true
+
+  # Synthetic observation detection settings
+  synthetic_detection:
+    enabled: true
+    # Methods enabled per domain (all on by default).
+    # Disable specific methods only if they produce excessive false positives
+    # in your operational environment.
+    methods:
+      statistical_distribution: true
+      temporal_sequence: true
+      cross_source_consistency: true
+      provenance_chain: true
+
+# --- Epistemic Field ---
+epistemic_field:
+  # Staleness window for Confirmed region items (days).
+  # After this period without re-verification, items move to Disputed.
+  # Class 1 instrument data: 365 days. Class 2/3: 180 days.
+  confirmed_staleness_class1_days: 365
+  confirmed_staleness_class23_days: 180
+
+  # Alert when EFCS falls below this threshold.
+  efcs_alert_threshold: 0.700
+  efcs_critical_threshold: 0.500
+
+  # Maximum days an Unknown region item may exist in governance-critical
+  # domains without an approved observation gap Decision Contract.
+  unknown_region_critical_domain_max_days: 7
+
+# --- Self-observability ---
+self_monitoring:
+  # Heartbeat interval (minutes). AIOps writes a self-monitoring GPS sense
+  # message at this interval via the secondary channel.
+  heartbeat_interval_minutes: 5
+
+  # Alert if no heartbeat has been produced within this many minutes.
+  heartbeat_alert_minutes: 5
+  heartbeat_critical_minutes: 15
+
+  # Processing latency alert thresholds (seconds from ingestion to classification).
+  latency_alert_seconds: 30
+  latency_critical_seconds: 60
+
+# --- Coverage audit ---
+coverage_audit:
+  # Weekly coverage audit (Process AO7) schedule.
+  schedule: "0 9 * * 1"     # Monday 09:00 UTC
+
+  # Minimum domains that must have active coverage for audit to pass.
+  minimum_active_domains: 7  # All seven required
+
+  # Who to notify when coverage gaps are found.
+  alert_channel: ""          # Webhook URL or leave empty to use ledger.alert_channel
+
+# --- GC measurement production ---
+gc_measurement:
+  # Frequency of GC component measurement production (Process AO5).
+  # Overridden by operating mode: Normal=weekly, Stress=daily, Crisis=6h, GD=1h.
+  normal_mode_schedule: "0 8 * * 1"     # Weekly Monday 08:00 UTC
+  stress_mode_schedule: "0 8 * * *"     # Daily
+  crisis_mode_schedule: "0 */6 * * *"  # Every 6 hours
+  graceful_degradation_schedule: "0 * * * *"  # Hourly
+
+# --- Retention ---
+retention:
+  # Observability Store retention by record type (days).
+  # Governance Events are written to the Immutable Ledger (indefinite).
+  security_events_days: 2555      # 7 years
+  technical_metrics_days: 730     # 2 years
+  anomaly_records_days: 2555      # 7 years
+  standard_telemetry_days: 90
+
+# --- Runners ---
+runners:
+  default: "ubuntu-latest"
