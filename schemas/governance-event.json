@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GovernanceOperations/AIOps/schemas/governance-event.json",
+  "title": "GovOps Governance Event",
+  "description": "GPS §1.2 compliant Governance Event schema for AIOps-produced messages",
+  "type": "object",
+  "required": [
+    "govops_version",
+    "message_id",
+    "operation_type",
+    "timestamp",
+    "governance_context",
+    "actor_identity",
+    "input_data",
+    "output_data",
+    "security"
+  ],
+  "properties": {
+    "govops_version": { "type": "string", "enum": ["0.9"] },
+    "message_id": { "type": "string", "format": "uuid" },
+    "operation_type": {
+      "type": "string",
+      "enum": ["sense","verify","evaluate","propose","approve","execute",
+               "record","review","adapt","alert","escalation","system"]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "governance_context": {
+      "type": "object",
+      "required": ["governing_entity","governance_capacity_state",
+                   "governance_risk_level","governance_operational_state","operating_mode"],
+      "properties": {
+        "governing_entity": { "type": "string" },
+        "governance_capacity_state": { "type": "number", "minimum": 0, "maximum": 1 },
+        "governance_risk_level": { "type": "number", "minimum": 0, "maximum": 1 },
+        "governance_operational_state": { "type": "integer", "minimum": 0, "maximum": 4 },
+        "operating_mode": {
+          "type": "string",
+          "enum": ["normal","stress","crisis","graceful_degradation"]
+        },
+        "observer_sufficiency": {
+          "type": "string",
+          "enum": ["full","partial","insufficient","none"]
+        }
+      }
+    },
+    "actor_identity": {
+      "type": "object",
+      "required": ["actor_id","assurance_level"],
+      "properties": {
+        "actor_id": { "type": "string" },
+        "assurance_level": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "actor_type": { "type": "string" }
+      }
+    },
+    "input_data": {
+      "type": "object",
+      "properties": {
+        "input_verification_status": {
+          "type": "string",
+          "enum": ["unverified","internally_verified","externally_verified",
+                   "multi_observer_verified","adversarially_tested"]
+        },
+        "input_provenance": { "type": "string" }
+      }
+    },
+    "output_data": {
+      "type": "object",
+      "properties": {
+        "output_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "output_classification": { "type": "string" }
+      }
+    },
+    "operation_specification": {
+      "type": "object",
+      "properties": {
+        "operation_class": {
+          "type": "string",
+          "enum": ["reversible","conditional","irreversible"]
+        },
+        "decision_class": { "type": "string" }
+      }
+    },
+    "audit_trail": {
+      "type": "object",
+      "properties": {
+        "governance_record_reference": { "type": "string" },
+        "chain_id": { "type": "string" },
+        "sequence_number": { "type": "integer" },
+        "prior_hash": { "type": "string" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "required": ["signature","signing_algorithm"],
+      "properties": {
+        "signature": { "type": "string" },
+        "signing_algorithm": { "type": "string" },
+        "integrity_protocol_status": {
+          "type": "string",
+          "enum": ["passed","failed","pending","bypassed"]
+        }
+      }
+    }
+  }
+}
