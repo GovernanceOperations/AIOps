@@ -1,0 +1,50 @@
+name: GovOps AIOps Bridge
+description: >
+  Multi-source observability ingestion bridge for the GovOps AIOps Discipline.
+  Receives governance events from all fifteen discipline sources, classifies
+  them into the seven observability domains, and writes Governance Events to
+  the configured Immutable Ledger.
+
+  This app extends the GovOps projops Bridge for multi-source ingestion.
+  Where projops governs project delivery on GitHub, AIOps observes what all
+  disciplines produce and feeds the Centre with measurement data.
+
+url: https://github.com/GovernanceOperations/AIOps
+public: false
+default_permissions:
+  # Read access to Immutable Ledger chain (GPS §4.5 Audit Interface)
+  contents: read
+  # Write access to produce GPS Governance Events via issues (ledger proxy)
+  issues: write
+  # Read pull request metadata for governance domain observation
+  pull_requests: read
+  # Write status checks for governance gate signalling
+  statuses: write
+  # Read actions for pipeline governance observability
+  actions: read
+
+default_events:
+  # Governance Events from projops and other GitHub-hosted disciplines
+  - push
+  - pull_request
+  - pull_request_review
+  - issues
+  - issue_comment
+  - workflow_run
+  - deployment
+  - deployment_status
+  - repository_dispatch
+  - workflow_dispatch
+
+# Webhook configuration
+webhook_active: true
+
+# Setup instructions (shown during installation)
+setup_url: https://github.com/GovernanceOperations/AIOps/blob/main/docs/deploying-aiops.md
+
+# Hooks for AIOps Bridge endpoints
+# In production: replace with your deployed bridge endpoint URL
+hook_attributes:
+  url: https://your-aiops-bridge.example/webhook
+  content_type: json
+  insecure_ssl: "0"
