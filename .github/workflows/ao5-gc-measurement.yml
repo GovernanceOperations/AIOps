@@ -1,0 +1,152 @@
+name: AO5 — GC Component Measurement Production
+
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        required: true
+        type: string
+      operating-mode:
+        required: false
+        type: string
+        default: normal
+
+jobs:
+  gc-measurement:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify measurement prerequisites
+        id: prereqs
+        run: |
+          echo "Verifying measurement prerequisites..."
+          PREREQS_MET=true
+          REGISTRY=".github/govops/source-registry.json"
+          if [ ! -f "$REGISTRY" ]; then
+            echo "::error::Source registry not found — cannot produce GC measurements"
+            PREREQS_MET=false
+          fi
+          echo "prereqs_met=$PREREQS_MET" >> $GITHUB_OUTPUT
+
+      - name: Collect F (Fidelity) component inputs
+        id: fidelity
+        if: steps.prereqs.outputs.prereqs_met == 'true'
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Aggregate all Fidelity component inputs per GADS §6.5.
+          # Sources: LO-F-I1, PO-F-I1, SO-F-I1, SO-F-I2, CD-F-I1,
+          # IC-F-I1, ISD-F-I1, FG-F-I1, DO-F-I1, DO-F-I2, AIG-F-I1.
+          echo "Collecting Fidelity (F) component inputs..."
+          # In production: retrieve latest instrument values from Observability Store.
+          # Apply class weights: Class 1 = 1.0, Class 2 = 0.7, Class 3 = 0.5.
+          # Check staleness per GMF §2.2.1(g) before including each instrument.
+          F_SCORE="0.000"
+          echo "f_score=$F_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Collect CA (Capacity to Act) component inputs
+        id: capacity
+        if: steps.prereqs.outputs.prereqs_met == 'true'
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Sources: CD-CA-I1, CD-CA-I2, PO-CA-I1, NG-CA-I1.
+          echo "Collecting Capacity to Act (CA) component inputs..."
+          CA_SCORE="0.000"
+          echo "ca_score=$CA_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Collect II (Institutional Integrity) component inputs
+        id: integrity
+        if: steps.prereqs.outputs.prereqs_met == 'true'
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Sources: SO-II-I1, SO-II-I2, SO-II-I3, ITSM-AT-I1, FG-II-I1,
+          # AIG-II-I1, AIG-II-I2, IC-II-I1, ISD-II-I1, ISD-II-I2,
+          # PO-II-I1, NG-II-I1, LO-II-I1, ITSM-II-I1.
+          echo "Collecting Institutional Integrity (II) component inputs..."
+          II_SCORE="0.000"
+          echo "ii_score=$II_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Collect AT (Adaptive Transparency) component inputs
+        id: transparency
+        if: steps.prereqs.outputs.prereqs_met == 'true'
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          # Sources: DO-AT-I1, ITSM-AT-I2, SO-AT-I1, SO-CA-I1, RO-AT-I1,
+          # RO-AT-I2, FG-AT-I1, AO-AT-I1, AO-AT-I2, IC-AT-I1.
+          echo "Collecting Adaptive Transparency (AT) component inputs..."
+          AT_SCORE="0.000"
+          echo "at_score=$AT_SCORE" >> $GITHUB_OUTPUT
+
+      - name: Compute GC and Confidence Factor
+        id: gc-compute
+        if: steps.prereqs.outputs.prereqs_met == 'true'
+        run: |
+          F=${{ steps.fidelity.outputs.f_score }}
+          CA=${{ steps.capacity.outputs.ca_score }}
+          II=${{ steps.integrity.outputs.ii_score }}
+          AT=${{ steps.transparency.outputs.at_score }}
+
+          # GC = F × CA × II × AT — non-compensatory per GOS §2.2
+          GC=$(echo "scale=3; ${F:-0} * ${CA:-0} * ${II:-0} * ${AT:-0}" | bc)
+
+          # Confidence Factor = OAS × MU_factor × EFCS per GMF §4.4
+          # In production: retrieve OAS from AO3 output, MU_factor from
+          # instrument uncertainty computation, EFCS from AO4 output.
+          OAS="0.000"
+          MU_FACTOR="0.000"
+          EFCS="0.000"
+          CF=$(echo "scale=3; ${OAS:-0} * ${MU_FACTOR:-0} * ${EFCS:-0}" | bc)
+
+          # Effective GC = GC × CF per GOS §26.5
+          EFFECTIVE_GC=$(echo "scale=3; ${GC:-0} * ${CF:-0}" | bc)
+
+          echo "gc=$GC" >> $GITHUB_OUTPUT
+          echo "cf=$CF" >> $GITHUB_OUTPUT
+          echo "effective_gc=$EFFECTIVE_GC" >> $GITHUB_OUTPUT
+          echo "oas=$OAS" >> $GITHUB_OUTPUT
+          echo "mu_factor=$MU_FACTOR" >> $GITHUB_OUTPUT
+          echo "efcs=$EFCS" >> $GITHUB_OUTPUT
+
+          if (( $(echo "${EFFECTIVE_GC:-0} < 0.200" | bc -l) )); then
+            echo "::warning::Effective GC below 0.200 — low confidence advisory per GMF §4.4.2"
+          fi
+
+      - name: Write GPS evaluate message to ledger
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%6NZ")
+          cat << EOF
+          ==========================================
+          GC MEASUREMENT CYCLE — $TIMESTAMP
+          ==========================================
+          F  (Fidelity):               ${{ steps.fidelity.outputs.f_score }}
+          CA (Capacity to Act):        ${{ steps.capacity.outputs.ca_score }}
+          II (Institutional Integrity):${{ steps.integrity.outputs.ii_score }}
+          AT (Adaptive Transparency):  ${{ steps.transparency.outputs.at_score }}
+          ----------------------------------------
+          Raw GC (F×CA×II×AT):         ${{ steps.gc-compute.outputs.gc }}
+          OAS:                         ${{ steps.gc-compute.outputs.oas }}
+          MU_factor:                   ${{ steps.gc-compute.outputs.mu_factor }}
+          EFCS:                        ${{ steps.gc-compute.outputs.efcs }}
+          Confidence Factor:           ${{ steps.gc-compute.outputs.cf }}
+          ----------------------------------------
+          Effective GC:                ${{ steps.gc-compute.outputs.effective_gc }}
+          Operating Mode:              ${{ inputs.operating-mode }}
+          ==========================================
+          EOF
+          # In production: write GPS evaluate operation to Immutable Ledger
+          # per GADS §9 GPS Message Bindings with all confidence_derivation fields.
+
+      - name: Transmit to RiskOps
+        env:
+          AIOPS_GPS_API_KEY: ${{ secrets.AIOPS_GPS_API_KEY }}
+        run: |
+          # If gps_endpoint.enabled: true in aiops.yml, POST GPS evaluate
+          # message to Centre GPS endpoint for RiskOps consumption.
+          echo "RiskOps transmission: implement in production per GADS §9"
