@@ -123,6 +123,7 @@ add these secrets:
 | `PROJOPS_AUDIT_KEY` | If using projops source | API key for projops ledger GPS §4.5 audit |
 | `PROMETHEUS_API_KEY` | If using Prometheus source | Bearer token for Prometheus endpoint |
 | `SECOPS_WEBHOOK_SECRET` | If using SecOps webhook source | HMAC secret for SecOps webhook |
+| `ISD_WEBHOOK_SECRET` | If using ISD webhook source | HMAC secret for ISD gate result webhook |
 | `NETWORK_WEBHOOK_SECRET` | If using NetworkGov webhook | HMAC secret for NetworkGov webhook |
 | `SOCIETAL_WEBHOOK_SECRET` | If using SocietalOps webhook | HMAC secret for SocietalOps webhook |
 | `FINGOV_WEBHOOK_SECRET` | If using FinGov webhook | HMAC secret for FinGov webhook |
