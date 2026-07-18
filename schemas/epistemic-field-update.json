@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GovernanceOperations/AIOps/schemas/epistemic-field-update.json",
+  "title": "AIOps Epistemic Field Update",
+  "description": "Schema for an Epistemic Field reclassification update per GADS §5 and AMD-001 §C.2.6",
+  "type": "object",
+  "required": [
+    "update_id",
+    "update_timestamp",
+    "update_type",
+    "domain",
+    "item_id",
+    "from_region",
+    "to_region",
+    "update_reason",
+    "efcs_before",
+    "efcs_after"
+  ],
+  "properties": {
+    "update_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 for this specific EF update event"
+    },
+    "update_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC when this update was applied"
+    },
+    "update_type": {
+      "type": "string",
+      "enum": [
+        "region_reclassification",
+        "coverage_extension",
+        "disputed_resolution",
+        "unknown_mapped",
+        "staleness_demotion",
+        "synthetic_quarantine"
+      ],
+      "description": "Type of Epistemic Field update per GADS §5 and AMD-001 §C.2.6"
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["technical", "governance", "financial", "security", "identity", "stakeholder", "adversarial"],
+      "description": "Observability domain of the updated item"
+    },
+    "item_id": {
+      "type": "string",
+      "description": "Identifier of the EF item being reclassified"
+    },
+    "item_description": {
+      "type": "string",
+      "description": "Human-readable description of what this EF item represents"
+    },
+    "from_region": {
+      "type": "string",
+      "enum": ["confirmed", "disputed", "unknown", "none"],
+      "description": "Epistemic region before this update (none = new item)"
+    },
+    "to_region": {
+      "type": "string",
+      "enum": ["confirmed", "disputed", "unknown"],
+      "description": "Epistemic region after this update"
+    },
+    "update_reason": {
+      "type": "string",
+      "description": "Explanation of why this reclassification occurred"
+    },
+    "triggering_record_ids": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "Observability Store record IDs that triggered this reclassification"
+    },
+    "triggering_gps_message_id": {
+      "type": "string",
+      "description": "GPS message_id that triggered this update, if applicable"
+    },
+    "confirmed_expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "For to_region: confirmed — when this item must be re-verified"
+    },
+    "instrument_class": {
+      "type": "string",
+      "enum": ["1", "2", "3"],
+      "description": "GMF instrument class of the evidence supporting Confirmed classification"
+    },
+    "dispute_observer_positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "observer_type": { "type": "string" },
+          "position": { "type": "string" },
+          "ois": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      },
+      "description": "For to_region: disputed — the observer positions causing disagreement"
+    },
+    "efcs_before": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "EFCS value before this update"
+    },
+    "efcs_after": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "EFCS value after this update"
+    },
+    "gps_adapt_message_ref": {
+      "type": "string",
+      "description": "GPS adapt message_id that carries this update in adapt_payload.epistemic_field_updates"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GovernanceOperations/AIOps/schemas/observability-record.json",
+  "title": "AIOps Observability Store Record",
+  "description": "Schema for a single record in the AIOps Observability Store per GADS §3.2",
+  "type": "object",
+  "required": [
+    "record_id",
+    "domain",
+    "source_discipline",
+    "source_component",
+    "collection_timestamp",
+    "event_timestamp",
+    "record_type",
+    "content",
+    "provenance_hash",
+    "provenance_signature",
+    "epistemic_region",
+    "processing_status",
+    "retention_days"
+  ],
+  "properties": {
+    "record_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 unique identifier for this record"
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["technical", "governance", "financial", "security", "identity", "stakeholder", "adversarial"],
+      "description": "Observability domain per GADS §2"
+    },
+    "source_discipline": {
+      "type": "string",
+      "description": "GOS discipline identifier that produced this record (e.g. SecOps, FinGov)"
+    },
+    "source_component": {
+      "type": "string",
+      "description": "Specific system or service within the discipline that produced this record"
+    },
+    "source_id": {
+      "type": "string",
+      "description": "Source registry identifier from source-registry.json"
+    },
+    "collection_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC microsecond — when AIOps received this record"
+    },
+    "event_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC microsecond — when the event actually occurred"
+    },
+    "record_type": {
+      "type": "string",
+      "enum": ["metric", "log", "trace", "event", "alert", "state_change"],
+      "description": "Category of observability record"
+    },
+    "content": {
+      "type": "object",
+      "description": "Domain-specific structured payload. Schema varies by domain and record_type."
+    },
+    "provenance_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-3-256 hex of the content field"
+    },
+    "provenance_signature": {
+      "type": "string",
+      "description": "Base64url post-quantum signature per GOS §11.2"
+    },
+    "provenance_verified": {
+      "type": "boolean",
+      "description": "Whether the provenance_signature has been verified by AIOps"
+    },
+    "epistemic_region": {
+      "type": "string",
+      "enum": ["confirmed", "disputed", "unknown"],
+      "description": "Epistemic Field region assignment per GADS §5"
+    },
+    "dispute_reason": {
+      "type": "string",
+      "description": "If epistemic_region is disputed: the reason for dispute"
+    },
+    "anomaly_score": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Standard deviations from domain baseline (0 = no deviation)"
+    },
+    "anomaly_tier": {
+      "type": "string",
+      "enum": ["none", "informational", "notable", "significant", "critical"],
+      "description": "Anomaly detection tier per GADS §4.2"
+    },
+    "synthetic_detection_flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["statistical_distribution", "temporal_sequence", "cross_source_consistency", "provenance_chain"]
+      },
+      "description": "Synthetic observation detection methods that flagged this record per GADS §4.4"
+    },
+    "processing_status": {
+      "type": "string",
+      "enum": ["raw", "classified", "correlated", "acted_upon"],
+      "description": "Current processing stage"
+    },
+    "gc_component_contribution": {
+      "type": "string",
+      "enum": ["F", "CA", "II", "AT", "multiple", "none"],
+      "description": "GC component(s) this record contributes to"
+    },
+    "instrument_id": {
+      "type": "string",
+      "description": "GMF MIR instrument identifier if this record feeds a specific instrument"
+    },
+    "retention_days": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of days to retain in Observability Store per GADS §3.2"
+    }
+  },
+  "additionalProperties": false
+}

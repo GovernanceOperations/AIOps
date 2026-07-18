@@ -1,0 +1,176 @@
+# AIOps Cross-Domain Correlation Rules
+#
+# Defines the six mandatory correlation patterns from GADS §4.3
+# plus optional organisation-specific patterns.
+#
+# Each pattern specifies:
+#   id:             unique rule identifier
+#   name:           human-readable name
+#   gads_reference: normative source in GADS specification
+#   mandatory:      true = cannot be disabled (GADS §4.3 requirement)
+#   enabled:        operational enable/disable switch
+#   window_minutes: sliding time window for pattern matching
+#   domains:        domains involved in this pattern
+#   conditions:     what must be observed in each domain to trigger
+#   severity:       GPS alert severity on trigger
+#   alert_type:     GPS alert_type on trigger
+#   description:    governance significance of this pattern
+
+mandatory_patterns:
+
+  - id: CORR-001
+    name: Security Event Plus Financial Anomaly
+    gads_reference: "GADS §4.3 Pattern 1"
+    mandatory: true
+    enabled: true
+    window_minutes: 60
+    domains:
+      - security
+      - financial
+    conditions:
+      security:
+        # A security incident declared (P1 or P2) OR a critical finding opened
+        min_severity: critical
+        event_types: ["incident_declared", "critical_finding_opened"]
+      financial:
+        # Any over-authority expenditure or statistical anomaly (>3σ)
+        event_types: ["over_authority_detected", "expenditure_anomaly"]
+        anomaly_tier_minimum: significant
+    severity: high
+    alert_type: metric_drift
+    description: >
+      A security incident coinciding with a financial anomaly may indicate
+      financial fraud being masked by a security event, or a compromised
+      financial system being exploited during an active incident. Requires
+      joint SecOps + FinGov investigation.
+
+  - id: CORR-002
+    name: Identity Anomaly Plus Governance Bypass
+    gads_reference: "GADS §4.3 Pattern 2"
+    mandatory: true
+    enabled: true
+    window_minutes: 60
+    domains:
+      - identity
+      - governance
+    conditions:
+      identity:
+        event_types: ["privilege_escalation", "dormant_account_activation", "unusual_access_timing"]
+        anomaly_tier_minimum: notable
+      governance:
+        event_types: ["gate_bypassed", "governance_bypass_alert", "exception_granted"]
+    severity: high
+    alert_type: reality_integrity_failure
+    description: >
+      Privileged access anomalies coinciding with governance bypasses suggest
+      that elevated access is being used to circumvent governance gates.
+      This pattern is a primary indicator of insider threat targeting the
+      governance system itself.
+
+  - id: CORR-003
+    name: Stakeholder Signal Decline Plus Disclosure Delay
+    gads_reference: "GADS §4.3 Pattern 3"
+    mandatory: true
+    enabled: true
+    window_minutes: 10080   # 7 days — stakeholder signals are slower-moving
+    domains:
+      - stakeholder
+      - governance
+    conditions:
+      stakeholder:
+        # Feedback sentiment declining below alert threshold
+        event_types: ["sentiment_decline", "feedback_volume_drop", "isaf_access_anomaly"]
+        anomaly_tier_minimum: notable
+      governance:
+        # Disclosure scheduled but not produced, or produced late
+        event_types: ["disclosure_overdue", "disclosure_delayed"]
+    severity: high
+    alert_type: metric_drift
+    description: >
+      Declining stakeholder engagement or satisfaction coinciding with delayed
+      disclosures may indicate information suppression — a Fidelity violation
+      and potential Constitutional Condition III concern. Routes to SocietalOps
+      and Oversight Body for assessment.
+
+  - id: CORR-004
+    name: Multi-Discipline Alert Spike
+    gads_reference: "GADS §4.3 Pattern 4"
+    mandatory: true
+    enabled: true
+    window_minutes: 60
+    domains:
+      - technical
+      - governance
+      - security
+      - financial
+      - identity
+      - stakeholder
+      - adversarial
+    conditions:
+      # Trigger when three or more domains each produce a high-severity alert
+      # within the window — indicates coordinated stress on the governance system
+      minimum_domains_with_high_alerts: 3
+      minimum_alert_severity: high
+    severity: critical
+    alert_type: reality_integrity_failure
+    description: >
+      Simultaneous high-severity alerts across three or more domains indicates
+      a coordinated attack or systemic governance failure. This pattern is the
+      primary trigger for Crisis mode assessment. Immediate Oversight Body
+      escalation. All pending Irreversible decisions suspended pending review.
+
+  - id: CORR-005
+    name: AI Model Drift Plus Data Quality Decline
+    gads_reference: "GADS §4.3 Pattern 5"
+    mandatory: true
+    enabled: true
+    window_minutes: 1440   # 24 hours
+    domains:
+      - governance    # AI Governance events
+      - technical     # DataOps quality events (classified as technical)
+    conditions:
+      governance:
+        event_types: ["model_drift_threshold_breach", "model_suspended"]
+      technical:
+        event_types: ["data_quality_failure", "pipeline_failure"]
+        # Specifically data quality events from DataOps sources
+        source_discipline_filter: "DataOps"
+    severity: high
+    alert_type: metric_drift
+    description: >
+      AI model performance drift coinciding with data quality decline suggests
+      training data contamination — the model's inputs are degrading, causing
+      its outputs to degrade. Routes to AI Governance and DataOps for joint
+      investigation. Affected model's GC measurement contributions are
+      downweighted until resolved.
+
+  - id: CORR-006
+    name: Pipeline Gate Bypass Spike Plus Security Posture Decline
+    gads_reference: "GADS §4.3 Pattern 6"
+    mandatory: true
+    enabled: true
+    window_minutes: 480   # 8 hours
+    domains:
+      - governance    # CD/ISD gate bypass events
+      - security      # SecOps posture score
+    conditions:
+      governance:
+        event_types: ["gate_bypassed", "security_gate_exception_granted"]
+        minimum_count: 3   # Three or more bypasses in the window
+      security:
+        event_types: ["security_posture_decline", "sfr_open_count_increase"]
+        anomaly_tier_minimum: notable
+    severity: high
+    alert_type: metric_drift
+    description: >
+      Multiple gate bypasses in the delivery pipeline coinciding with a
+      declining security posture suggests systematic evasion of security
+      controls. This is the ISD exception pattern trigger (PDSS §3.4 Process
+      IS3) scaled to cross-domain evidence. Routes to ISD Lead, SecOps, and
+      Oversight Body awareness.
+
+# Optional organisation-specific patterns
+# Add your own correlation patterns below this line.
+# Follow the same schema as the mandatory_patterns above.
+# Set mandatory: false and enabled: true to activate.
+optional_patterns: []
