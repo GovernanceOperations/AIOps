@@ -97,6 +97,15 @@ AIOps/
 
 ## Quick Start
 
+**Before Step 1 — this repository is safe to clone before you're ready to
+configure it.** The workflows check for `aiops.yml` before doing anything
+else. Until you complete Step 1, all seven AO processes are skipped (not
+failed) on every scheduled run. See `docs/deploying-aiops.md#deployment-readiness-gate`
+for details. If your Immutable Ledger does not exist yet, it is fine to
+leave the repository in this state indefinitely — nothing will error.
+
+**Otherwise, an easy drop in tarball should do the trick, just download and extract it.**
+
 **Step 1 — Configure sources.**  
 Copy `aiops.yml.example` to `aiops.yml` in this repository. Add your
 Immutable Ledger endpoint, GPS endpoint (if using full protocol), and
