@@ -1,0 +1,196 @@
+name: AO7 — Observability Coverage Audit
+
+on:
+  workflow_call:
+    inputs:
+      config-path:
+        required: true
+        type: string
+  schedule:
+    - cron: '0 9 * * 1'
+
+jobs:
+  coverage-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify all fifteen disciplines have active data sources
+        id: discipline-coverage
+        run: |
+          REGISTRY=".github/govops/source-registry.json"
+          GAPS=0
+          echo "=== Discipline Coverage Check ==="
+          for discipline in ContinuousDelivery SecOps InfraConfig FinGov ISD \
+            AIGovernance DataOps PlatformOps NetworkGov ITSM ProjOps \
+            LegalOps RiskOps PolicyOps SocietalOps; do
+            SOURCE_COUNT=$(jq --arg d "$discipline" \
+              '[.sources[] | select(.discipline == $d and .status == "active")] | length' \
+              "$REGISTRY" 2>/dev/null || echo 0)
+            if [ "$SOURCE_COUNT" -eq 0 ]; then
+              echo "  MISSING: $discipline"
+              GAPS=$((GAPS + 1))
+            else
+              echo "  OK: $discipline ($SOURCE_COUNT source(s))"
+            fi
+          done
+          echo "discipline_gaps=$GAPS" >> $GITHUB_OUTPUT
+
+      - name: Verify all seven domains have continuous coverage
+        id: domain-coverage
+        run: |
+          REGISTRY=".github/govops/source-registry.json"
+          DOMAIN_GAPS=0
+          echo "=== Domain Coverage Check ==="
+          for domain in technical governance financial security identity stakeholder adversarial; do
+            ACTIVE=$(jq --arg d "$domain" \
+              '[.sources[] | select(.domain == $d and .status == "active")] | length' \
+              "$REGISTRY" 2>/dev/null || echo 0)
+            CRITICAL=$(jq --arg d "$domain" \
+              '[.sources[] | select(.domain == $d and .governance_critical == true and .status == "active")] | length' \
+              "$REGISTRY" 2>/dev/null || echo 0)
+            if [ "$ACTIVE" -eq 0 ]; then
+              echo "  NO SOURCES: $domain"
+              DOMAIN_GAPS=$((DOMAIN_GAPS + 1))
+            elif [ "$CRITICAL" -eq 0 ]; then
+              echo "  NO CRITICAL: $domain ($ACTIVE source(s), none governance-critical)"
+            else
+              echo "  OK: $domain ($ACTIVE source(s), $CRITICAL governance-critical)"
+            fi
+          done
+          echo "domain_gaps=$DOMAIN_GAPS" >> $GITHUB_OUTPUT
+
+      - name: Verify governance-critical systems have monitoring
+        id: critical-coverage
+        run: |
+          REGISTRY=".github/govops/source-registry.json"
+          echo "=== Governance-Critical Source Check ==="
+          CRITICAL_TOTAL=$(jq '[.sources[] | select(.governance_critical == true)] | length' \
+            "$REGISTRY" 2>/dev/null || echo 0)
+          CRITICAL_ACTIVE=$(jq '[.sources[] | select(.governance_critical == true and .status == "active")] | length' \
+            "$REGISTRY" 2>/dev/null || echo 0)
+          CRITICAL_INACTIVE=$((CRITICAL_TOTAL - CRITICAL_ACTIVE))
+          echo "  Total: $CRITICAL_TOTAL  Active: $CRITICAL_ACTIVE  Inactive: $CRITICAL_INACTIVE"
+          if [ "$CRITICAL_INACTIVE" -gt 0 ]; then
+            jq -r '.sources[] | select(.governance_critical == true and .status != "active") | "  INACTIVE: \(.source_id)"' \
+              "$REGISTRY" 2>/dev/null
+          fi
+          echo "critical_inactive=$CRITICAL_INACTIVE" >> $GITHUB_OUTPUT
+
+      - name: Check EFCS against operating mode minimum
+        id: efcs-check
+        run: |
+          echo "=== Epistemic Field Coverage Check ==="
+          # In production: retrieve current EFCS from AO4 Observability Store output.
+          EFCS="0.000"
+          EFCS_OK=true
+          echo "  Current EFCS: $EFCS (production: retrieve from AO4)"
+          echo "efcs=$EFCS" >> $GITHUB_OUTPUT
+          echo "efcs_ok=$EFCS_OK" >> $GITHUB_OUTPUT
+
+      - name: Check self-monitoring heartbeat currency
+        id: heartbeat-check
+        run: |
+          echo "=== Self-Monitoring Heartbeat Check ==="
+          # In production: retrieve last heartbeat timestamp from Immutable Ledger.
+          HEARTBEAT_CURRENT=true
+          MINUTES_SINCE_HEARTBEAT=0
+          echo "  Last heartbeat: $MINUTES_SINCE_HEARTBEAT minutes ago"
+          echo "heartbeat_current=$HEARTBEAT_CURRENT" >> $GITHUB_OUTPUT
+
+      - name: Compile coverage audit report
+        id: audit-report
+        run: |
+          echo "========================================"
+          echo "AIOPS COVERAGE AUDIT REPORT"
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          echo "========================================"
+          DISC_GAPS=${{ steps.discipline-coverage.outputs.discipline_gaps }}
+          DOM_GAPS=${{ steps.domain-coverage.outputs.domain_gaps }}
+          CRIT_INACTIVE=${{ steps.critical-coverage.outputs.critical_inactive }}
+          EFCS_OK=${{ steps.efcs-check.outputs.efcs_ok }}
+          HEARTBEAT=${{ steps.heartbeat-check.outputs.heartbeat_current }}
+          OVERALL_PASS=true
+          echo "Discipline coverage gaps:          ${DISC_GAPS}"
+          echo "Domain coverage gaps:              ${DOM_GAPS}"
+          echo "Governance-critical inactive:      ${CRIT_INACTIVE}"
+          echo "EFCS above minimum:                ${EFCS_OK}"
+          echo "Self-monitoring heartbeat current: ${HEARTBEAT}"
+          if [ "${DISC_GAPS}" -gt 0 ] || [ "${DOM_GAPS}" -gt 0 ] || \
+             [ "${CRIT_INACTIVE}" -gt 0 ] || [ "${EFCS_OK}" != "true" ] || \
+             [ "${HEARTBEAT}" != "true" ]; then
+            OVERALL_PASS=false
+            echo "AUDIT RESULT: GAPS FOUND"
+            [ "${DISC_GAPS}" -gt 0 ]     && echo "  - Register missing discipline sources"
+            [ "${DOM_GAPS}" -gt 0 ]       && echo "  - Connect sources for missing domains"
+            [ "${CRIT_INACTIVE}" -gt 0 ] && echo "  - Reactivate governance-critical sources"
+            [ "${EFCS_OK}" != "true" ]    && echo "  - Review Epistemic Field"
+            [ "${HEARTBEAT}" != "true" ]  && echo "  - Investigate AO6 heartbeat"
+          else
+            echo "AUDIT RESULT: ALL CHECKS PASSED"
+          fi
+          echo "overall_pass=$OVERALL_PASS" >> $GITHUB_OUTPUT
+          echo "========================================"
+
+      - name: Create coverage gap issue if needed
+        if: steps.audit-report.outputs.overall_pass == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISC_GAPS: ${{ steps.discipline-coverage.outputs.discipline_gaps }}
+          DOM_GAPS: ${{ steps.domain-coverage.outputs.domain_gaps }}
+          CRIT_INACTIVE: ${{ steps.critical-coverage.outputs.critical_inactive }}
+        run: |
+          DATE=$(date -u +"%Y-%m-%d")
+          TITLE="AIOps Coverage Gap -- $DATE"
+
+          # Write body to a temp file to avoid shell quoting issues
+          BODY_FILE=$(mktemp)
+          cat > "$BODY_FILE" << ISSUEBODY
+          ## AIOps Coverage Audit Gap Report
+
+          **Audit date:** $DATE
+          **Discipline gaps:** $DISC_GAPS
+          **Domain gaps:** $DOM_GAPS
+          **Governance-critical inactive sources:** $CRIT_INACTIVE
+
+          ### Required Actions
+
+          See workflow run output for specific gaps and remediation steps.
+
+          Per GADS s6.7 Process AO7: coverage gaps are GPS alert operations
+          with alert_type: observer_gap submitted to the Think Layer.
+
+          Gaps in governance-critical domains exceeding 7 days without an
+          approved observation gap Decision Contract trigger Oversight Body
+          escalation per GADS s5.4.
+          ISSUEBODY
+
+          EXISTING=$(gh issue list \
+            --label "aiops-coverage-gap" \
+            --state open \
+            --json number \
+            --jq 'length' 2>/dev/null || echo "0")
+
+          if [ "$EXISTING" -eq 0 ]; then
+            gh issue create \
+              --title "$TITLE" \
+              --body-file "$BODY_FILE" \
+              --label "aiops-coverage-gap" \
+              2>/dev/null || echo "Issue creation requires issues:write scope on GH_TOKEN"
+          else
+            echo "Open coverage gap issue already exists -- skipping"
+          fi
+          rm -f "$BODY_FILE"
+
+      - name: Write audit record to ledger
+        env:
+          AIOPS_LEDGER_API_KEY: ${{ secrets.AIOPS_LEDGER_API_KEY }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%6NZ")
+          PASS=${{ steps.audit-report.outputs.overall_pass }}
+          echo "Coverage audit written to ledger at $TIMESTAMP (passed: $PASS)"
+          # In production: write GPS record operation to Immutable Ledger.

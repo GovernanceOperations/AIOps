@@ -1,0 +1,153 @@
+name: AIOps Observability Suite
+
+on:
+  schedule:
+    - cron: '0 * * * *'        # Hourly — overridden per process by operating mode
+  workflow_dispatch:
+    inputs:
+      process:
+        description: 'Specific process to run (leave empty for all)'
+        required: false
+        type: choice
+        options:
+          - all
+          - ao1-ingestion
+          - ao2-classification
+          - ao3-anomaly
+          - ao4-epistemic
+          - ao5-gc-measurement
+          - ao6-self-monitoring
+          - ao7-coverage-audit
+        default: all
+      operating_mode:
+        description: 'Current operating mode'
+        required: false
+        type: choice
+        options:
+          - normal
+          - stress
+          - crisis
+          - graceful_degradation
+        default: normal
+  repository_dispatch:
+    types:
+      - governance-event-received
+      - anomaly-trigger
+      - coverage-audit-trigger
+      - gc-measurement-trigger
+
+jobs:
+  # Deployment readiness gate. Runs before every other job. If aiops.yml
+  # has not been created yet (deployment not configured — see
+  # docs/deploying-aiops.md Step 2), every downstream job is skipped
+  # cleanly rather than failing. This keeps Actions green on a repository
+  # that has been cloned but not yet configured, and avoids hourly
+  # scheduled failure notifications before deployment is complete.
+  check-deployment-ready:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check aiops.yml exists
+        id: check
+        run: |
+          if [ -f "aiops.yml" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "aiops.yml found — deployment configured, proceeding."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::aiops.yml not found. This is expected for a repository that has been cloned but not yet deployed."
+            echo "::notice::Copy aiops.yml.example to aiops.yml and fill in the required fields (see docs/deploying-aiops.md) to activate this workflow."
+          fi
+
+  # AO6 runs first — always — so self-monitoring is confirmed active
+  # before any other process begins
+  ao6-self-monitoring:
+    needs: check-deployment-ready
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      github.event_name == 'schedule' ||
+      github.event_name == 'repository_dispatch' ||
+      inputs.process == 'all' ||
+      inputs.process == 'ao6-self-monitoring')
+    uses: ./.github/workflows/ao6-self-observability.yml
+    with:
+      config-path: aiops.yml
+    secrets: inherit
+
+  ao1-continuous-ingestion:
+    needs: [check-deployment-ready, ao6-self-monitoring]
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      github.event_name == 'schedule' ||
+      github.event_name == 'repository_dispatch' ||
+      inputs.process == 'all' ||
+      inputs.process == 'ao1-ingestion')
+    uses: ./.github/workflows/ao1-continuous-ingestion.yml
+    with:
+      config-path: aiops.yml
+    secrets: inherit
+
+  ao2-classification-routing:
+    needs: [check-deployment-ready, ao1-continuous-ingestion]
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      needs.ao1-continuous-ingestion.result == 'success' ||
+      needs.ao1-continuous-ingestion.result == 'skipped')
+    uses: ./.github/workflows/ao2-classification-routing.yml
+    with:
+      config-path: aiops.yml
+    secrets: inherit
+
+  ao3-anomaly-detection:
+    needs: [check-deployment-ready, ao2-classification-routing]
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      needs.ao2-classification-routing.result == 'success' ||
+      needs.ao2-classification-routing.result == 'skipped')
+    uses: ./.github/workflows/ao3-anomaly-detection.yml
+    with:
+      config-path: aiops.yml
+    secrets: inherit
+
+  ao4-epistemic-field:
+    needs: [check-deployment-ready, ao3-anomaly-detection]
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      needs.ao3-anomaly-detection.result == 'success' ||
+      needs.ao3-anomaly-detection.result == 'skipped')
+    uses: ./.github/workflows/ao4-epistemic-field.yml
+    with:
+      config-path: aiops.yml
+    secrets: inherit
+
+  ao5-gc-measurement:
+    needs: [check-deployment-ready, ao4-epistemic-field]
+    # GC measurement runs on its own schedule based on operating mode.
+    # On schedule trigger: check if current time matches the mode's cadence.
+    # On manual trigger with process=ao5: always run.
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      inputs.process == 'ao5-gc-measurement' ||
+      inputs.process == 'all' ||
+      github.event.action == 'gc-measurement-trigger')
+    uses: ./.github/workflows/ao5-gc-measurement.yml
+    with:
+      config-path: aiops.yml
+      operating-mode: ${{ inputs.operating_mode || 'normal' }}
+    secrets: inherit
+
+  ao7-coverage-audit:
+    needs: [check-deployment-ready, ao4-epistemic-field]
+    # Coverage audit runs weekly on schedule or on manual trigger.
+    if: >
+      needs.check-deployment-ready.outputs.ready == 'true' && (
+      inputs.process == 'ao7-coverage-audit' ||
+      github.event.action == 'coverage-audit-trigger')
+    uses: ./.github/workflows/ao7-coverage-audit.yml
+    with:
+      config-path: aiops.yml
+    secrets: inherit
