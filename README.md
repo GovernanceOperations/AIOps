@@ -104,7 +104,8 @@ failed) on every scheduled run. See `docs/deploying-aiops.md#deployment-readines
 for details. If your Immutable Ledger does not exist yet, it is fine to
 leave the repository in this state indefinitely — nothing will error.
 
-**Otherwise, an easy drop in tarball should do the trick, just download and extract it.**
+**Otherwise, an easy drop in tarball should do the trick, just download and extract it.** 
+Find it under /files directory.
 
 **Step 1 — Configure sources.**  
 Copy `aiops.yml.example` to `aiops.yml` in this repository. Add your
